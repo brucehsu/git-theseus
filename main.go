@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	gogit "github.com/go-git/go-git/v5"
+	gogit_plumbing "github.com/go-git/go-git/v5/plumbing"
 	"log"
 	"os"
 	"regexp"
@@ -15,8 +17,8 @@ type lineOrRange struct {
 }
 
 func main() {
-	if len(os.Args) != 4 {
-		fmt.Println("usage: git-theseus [BASE_SHA] [LINE_OR_RANGE] [COMPARE_SHA]")
+	if len(os.Args) != 5 {
+		fmt.Println("usage: git-theseus [BASE_SHA] [FILE_PATH] [LINE_OR_RANGE] [COMPARE_SHA]")
 		os.Exit(1)
 	}
 	pwd, err := os.Getwd()
@@ -25,13 +27,41 @@ func main() {
 	}
 
 	baseSha := os.Args[1]
-	cmpSha := os.Args[3]
-	baseRange := parseLineOrRange(os.Args[2])
+	baseFilePath := os.Args[2]
+	cmpSha := os.Args[4]
+	baseRange := parseLineOrRange(os.Args[3])
 
 	isSha(baseSha)
 	isSha(cmpSha)
 
-	fmt.Println(pwd, baseSha, cmpSha, baseRange)
+	repo, err := gogit.PlainOpen(pwd)
+	if err != nil {
+		log.Fatalf("Failed to open git repo at: %s\n", pwd)
+	}
+
+	baseCommit, err := repo.CommitObject(gogit_plumbing.NewHash(baseSha))
+	if err != nil {
+		log.Fatalf("Failed to get base commit: %s\n", baseSha)
+	}
+
+	baseTree, err := repo.TreeObject(baseCommit.TreeHash)
+	if err != nil {
+		log.Fatalf("Failed to get base tree: %s\n", baseCommit.TreeHash)
+	}
+
+	baseFile, err := baseTree.File(baseFilePath)
+	if err != nil {
+		log.Fatalf("Failed to get base file: %s\n", baseFilePath)
+	}
+
+	baseContent, err := baseFile.Lines()
+	if err != nil {
+		log.Fatalf("Failed to get base file content: %s\n", err)
+	}
+
+	for l := baseRange.start - 1; l < baseRange.end; l++ {
+		fmt.Println(baseContent[l])
+	}
 }
 
 func isSha(arg string) {
@@ -55,6 +85,8 @@ func parseLineOrRange(arg string) *lineOrRange {
 		if err != nil {
 			log.Fatalf("Failed to parse given line/range: %v\n", err)
 		}
+	} else {
+		end = start
 	}
 
 	return &lineOrRange{
