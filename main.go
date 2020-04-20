@@ -223,7 +223,6 @@ func buildFilesAndHunks(chunksMap map[string][]gogit_diff.Chunk) (map[string][]s
 					file = append(file, lines...)
 					printDiff("+", lines)
 				case gogit_diff.Delete:
-					// Do nothing
 					h = append(h, hunk{
 						contentRange: &lineOrRange{
 							start: lineCursor + 1,
