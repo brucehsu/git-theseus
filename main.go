@@ -86,11 +86,11 @@ func findSectionInPatches(path string, baseLines []string, baseRange *lineOrRang
 				break
 			}
 		}
-		if resultRange.start < 1 {
+		if resultRange.start < 1 { // Chances are the code itself got deleted
 			resultRange = nil
 		} else {
 			for i, l := range file[resultRange.start-1 : resultRange.end] {
-				if strings.Compare(baseLines[i], l) != 0 {
+				if strings.Compare(baseLines[i], l) != 0 { // FIXME: Naive line-by-line comparison
 					resultRange = nil
 					break
 				}
@@ -121,6 +121,8 @@ func findSectionInPatches(path string, baseLines []string, baseRange *lineOrRang
 				i := 0
 				start := -1
 				for j, l := range h.contentLines {
+					// Compare line-by-line to handle when the hunk including
+					// the target has other changes along with it
 					if i < len(baseLines) && strings.Compare(baseLines[i], l) == 0 {
 						if start == -1 {
 							start = j
