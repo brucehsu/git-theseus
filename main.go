@@ -48,6 +48,21 @@ func main() {
 
 	baseTree := getGitTree(repo, baseSha)
 
+	baseLines := getBaseLines(baseTree, baseFilePath)
+
+	for i := baseRange.start - 1; i < baseRange.end; i++ {
+		fmt.Println(baseLines[i])
+	}
+
+	cmpTree := getGitTree(repo, cmpSha)
+
+	chunks := buildChunks(baseTree, cmpTree)
+
+	hunks := buildHunks(chunks)
+	fmt.Println(hunks)
+}
+
+func getBaseLines(baseTree *gogit_object.Tree, baseFilePath string) []string {
 	baseFile, err := baseTree.File(baseFilePath)
 	if err != nil {
 		log.Fatalf("Failed to get base file: %s\n", baseFilePath)
@@ -58,16 +73,7 @@ func main() {
 		log.Fatalf("Failed to get base file content: %s\n", err)
 	}
 
-	for l := baseRange.start - 1; l < baseRange.end; l++ {
-		fmt.Println(baseContent[l])
-	}
-
-	cmpTree := getGitTree(repo, cmpSha)
-
-	chunks := buildChunks(baseTree, cmpTree)
-
-	hunks := buildHunks(chunks)
-	fmt.Println(hunks)
+	return baseContent
 }
 
 func buildChunks(from, to *gogit_object.Tree) map[string][]gogit_diff.Chunk {
