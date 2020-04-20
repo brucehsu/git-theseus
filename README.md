@@ -14,7 +14,8 @@ Given code found in addition.rb#L8-8
 Given code found in moved.rb#L1-3
 ```
 
-## Known Issues
+## Known Issues/Limitation
 - Current implementation does not handle the scenario when the format of the given code, say indentation, has changed
 - Content comparison is done line-by-line
 - Messy structure and hard-coded values
+- The tool does not analyze the semantic, only the lexical form.
