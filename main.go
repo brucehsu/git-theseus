@@ -19,8 +19,9 @@ type lineOrRange struct {
 }
 
 type hunk struct {
-	contentRange lineOrRange
+	contentRange *lineOrRange
 	contentLines []string
+	opType       gogit_diff.Operation
 }
 
 func main() {
@@ -49,17 +50,80 @@ func main() {
 	baseTree := getGitTree(repo, baseSha)
 
 	baseLines := getBaseLines(baseTree, baseFilePath)
-
-	for i := baseRange.start - 1; i < baseRange.end; i++ {
-		fmt.Println(baseLines[i])
-	}
+	baseLines = baseLines[baseRange.start - 1:baseRange.end]
 
 	cmpTree := getGitTree(repo, cmpSha)
 
 	chunks := buildChunks(baseTree, cmpTree)
 
-	hunks := buildHunks(chunks)
-	fmt.Println(hunks)
+	files, hunks := buildFilesAndHunks(chunks)
+
+	findSectionInPatches(baseFilePath, baseLines, baseRange, files, hunks)
+}
+
+func findSectionInPatches(path string, baseLines []string, baseRange *lineOrRange, files map[string][]string, hunksMap map[string][]hunk) {
+	// check the same file path first
+	hunks, existed := hunksMap[path]
+	resultRange := &lineOrRange{
+		start: baseRange.start,
+		end: baseRange.end,
+	}
+	if existed {
+		delete(hunksMap, path)
+		file := files[path]
+		for _, h := range hunks {
+			if h.contentRange.start <= resultRange.start {
+				if h.opType == gogit_diff.Add {
+					resultRange.start += (h.contentRange.end - h.contentRange.start) + 1
+					resultRange.end += (h.contentRange.end - h.contentRange.start) + 1
+				} else {
+					resultRange.start -= (h.contentRange.end - h.contentRange.start) + 1
+					resultRange.end -= (h.contentRange.end - h.contentRange.start) + 1
+				}
+			} else {
+				break
+			}
+		}
+		if resultRange.start < 1 {
+			resultRange = nil
+		} else {
+			for i, l := range file[resultRange.start-1:resultRange.end] {
+				if strings.Compare(baseLines[i], l) != 0 {
+					resultRange = nil
+					break
+				}
+			}
+		}
+		if resultRange != nil {
+			fmt.Printf("Given code found in %s#L%d-%d\n", path, resultRange.start, resultRange.end)
+			return
+		}
+	}
+
+	// check if the given code has been moved to another file
+	for hunkPath, hunks := range hunksMap {
+		for _, h := range hunks {
+			if h.opType == gogit_diff.Delete {
+				continue
+			}
+
+			i := 0
+			start := -1
+			for j, l := range h.contentLines {
+				if i < len(baseLines) && strings.Compare(baseLines[i], l) == 0 {
+					if start == -1 {
+						start = j
+					}
+					i += 1
+				}
+			}
+
+			if i == len(baseLines) {
+				fmt.Printf("Given code found in %s#L%d-%d\n", hunkPath, h.contentRange.start + start, h.contentRange.start + start + len(baseLines) - 1)
+				return
+			}
+		}
+	}
 }
 
 func getBaseLines(baseTree *gogit_object.Tree, baseFilePath string) []string {
@@ -101,12 +165,14 @@ func buildChunks(from, to *gogit_object.Tree) map[string][]gogit_diff.Chunk {
 	return chunks
 }
 
-func buildHunks(chunks map[string][]gogit_diff.Chunk) map[string][]hunk {
+
+func buildFilesAndHunks(chunks map[string][]gogit_diff.Chunk) (map[string][]string, map[string][]hunk) {
 	hunks := make(map[string][]hunk)
+	files := make(map[string][]string)
 	for path, chunk := range chunks {
 		lineCursor := 0
-		fmt.Printf("# %s\n", path)
 		h := make([]hunk, 0)
+		file := make([]string, 0)
 		for _, c := range chunk {
 			lines := strings.Split(c.Content(), "\n") // naively use UNIX linebreak
 			if lines[len(lines)-1] == "" {
@@ -115,30 +181,44 @@ func buildHunks(chunks map[string][]gogit_diff.Chunk) map[string][]hunk {
 			switch c.Type() {
 			case gogit_diff.Equal:
 				lineCursor += len(lines)
+				file = append(file, lines...)
 				printDiff("=", lines)
 			case gogit_diff.Add:
 				h = append(h, hunk{
-					contentRange: lineOrRange{
+					contentRange: &lineOrRange{
 						start: lineCursor + 1,
 						end:   lineCursor + len(lines),
 					},
 					contentLines: lines,
+					opType: gogit_diff.Add,
 				})
 				lineCursor += len(lines)
+				file = append(file, lines...)
 				printDiff("+", lines)
 			case gogit_diff.Delete:
 				// Do nothing
+				h = append(h, hunk{
+					contentRange: &lineOrRange{
+						start: lineCursor + 1,
+						end:   lineCursor + len(lines),
+					},
+					contentLines: lines,
+					opType: gogit_diff.Delete,
+				})
 			}
 		}
 
+		files[path] = file
 		hunks[path] = h
-		fmt.Printf("#### length: %d %s\n", lineCursor, path)
 	}
 
-	return hunks
+	return files, hunks
 }
 
 func printDiff(prefix string, lines []string) {
+	if os.Getenv("THESEUS_DEBUG") != "1" {
+		return
+	}
 	for _, l := range lines {
 		fmt.Printf("%s %s\n", prefix, l)
 	}
@@ -171,6 +251,10 @@ func parseLineOrRange(arg string) *lineOrRange {
 	start, err := strconv.Atoi(splitted[0])
 	if err != nil {
 		log.Fatalf("Failed to parse given line/range: %v\n", err)
+	}
+
+	if start == 0 {
+		log.Fatalln("Given range should have a start > 0")
 	}
 
 	if len(splitted) > 1 {
