@@ -4,6 +4,8 @@ import (
 	"fmt"
 	gogit "github.com/go-git/go-git/v5"
 	gogit_plumbing "github.com/go-git/go-git/v5/plumbing"
+	gogit_diff "github.com/go-git/go-git/v5/plumbing/format/diff"
+	gogit_object "github.com/go-git/go-git/v5/plumbing/object"
 	"log"
 	"os"
 	"regexp"
@@ -39,15 +41,7 @@ func main() {
 		log.Fatalf("Failed to open git repo at: %s\n", pwd)
 	}
 
-	baseCommit, err := repo.CommitObject(gogit_plumbing.NewHash(baseSha))
-	if err != nil {
-		log.Fatalf("Failed to get base commit: %s\n", baseSha)
-	}
-
-	baseTree, err := repo.TreeObject(baseCommit.TreeHash)
-	if err != nil {
-		log.Fatalf("Failed to get base tree: %s\n", baseCommit.TreeHash)
-	}
+	baseTree := getGitTree(repo, baseSha)
 
 	baseFile, err := baseTree.File(baseFilePath)
 	if err != nil {
@@ -62,6 +56,62 @@ func main() {
 	for l := baseRange.start - 1; l < baseRange.end; l++ {
 		fmt.Println(baseContent[l])
 	}
+
+	cmpTree := getGitTree(repo, cmpSha)
+
+	patch, err := cmpTree.Patch(baseTree)
+	if err != nil {
+		log.Fatalf("Failed to obtain the patch: %s\n", err)
+	}
+
+	filePatches := patch.FilePatches()
+
+	chunks := make(map[string][]gogit_diff.Chunk)
+	for _, filePatch := range filePatches {
+		if filePatch.IsBinary() {
+			continue
+		}
+
+		_, to := filePatch.Files()
+		// skip deleted file
+		if to == nil {
+			continue
+		}
+		chunks[to.Path()] = filePatch.Chunks()
+	}
+	for path, chunk := range chunks {
+		fmt.Printf("# %s\n", path)
+		for _, c := range chunk {
+			switch c.Type() {
+			case gogit_diff.Equal:
+				printDiff("=", c.Content())
+			case gogit_diff.Add:
+				printDiff("+", c.Content())
+			case gogit_diff.Delete:
+				printDiff("-", c.Content())
+			}
+		}
+	}
+}
+
+func printDiff(prefix string, content string) {
+	lines := strings.Split(content, "\n")
+	for _, l := range lines {
+		fmt.Printf("%s %s\n", prefix, l)
+	}
+}
+
+func getGitTree(repo *gogit.Repository, sha string) *gogit_object.Tree {
+	commit, err := repo.CommitObject(gogit_plumbing.NewHash(sha))
+	if err != nil {
+		log.Fatalf("Failed to get commit: %s\n", sha)
+	}
+
+	tree, err := repo.TreeObject(commit.TreeHash)
+	if err != nil {
+		log.Fatalf("Failed to get tree: %s\n", commit.TreeHash)
+	}
+	return tree
 }
 
 func isSha(arg string) {
