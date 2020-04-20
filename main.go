@@ -102,28 +102,40 @@ func findSectionInPatches(path string, baseLines []string, baseRange *lineOrRang
 	}
 
 	// check if the given code has been moved to another file
-	for hunkPath, hunks := range hunksMap {
-		for _, h := range hunks {
-			if h.opType == gogit_diff.Delete {
-				continue
-			}
+	var wg sync.WaitGroup
+	resChan := make(chan string, len(hunksMap))
 
-			i := 0
-			start := -1
-			for j, l := range h.contentLines {
-				if i < len(baseLines) && strings.Compare(baseLines[i], l) == 0 {
-					if start == -1 {
-						start = j
+	for outerHunkPath, outerHunks := range hunksMap {
+		wg.Add(1)
+		go func(hunkPath string, hunks []hunk, waitgroup *sync.WaitGroup) {
+			defer waitgroup.Done()
+			for _, h := range hunks {
+				if h.opType == gogit_diff.Delete {
+					continue
+				}
+
+				i := 0
+				start := -1
+				for j, l := range h.contentLines {
+					if i < len(baseLines) && strings.Compare(baseLines[i], l) == 0 {
+						if start == -1 {
+							start = j
+						}
+						i += 1
 					}
-					i += 1
+				}
+
+				if i == len(baseLines) {
+					resChan <- fmt.Sprintf("Given code found in %s#L%d-%d\n", hunkPath, h.contentRange.start+start, h.contentRange.start+start+len(baseLines)-1)
+					return
 				}
 			}
+		}(outerHunkPath, outerHunks, &wg)
+	}
 
-			if i == len(baseLines) {
-				fmt.Printf("Given code found in %s#L%d-%d\n", hunkPath, h.contentRange.start+start, h.contentRange.start+start+len(baseLines)-1)
-				return
-			}
-		}
+	wg.Wait()
+	for i := 0; i < len(resChan); i++ {
+		fmt.Print(<-resChan)
 	}
 }
 
