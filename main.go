@@ -55,14 +55,14 @@ func main() {
 
 	cmpTree := getGitTree(repo, cmpSha)
 
-	chunks := buildChunks(baseTree, cmpTree)
+	chunksMap := buildChunksMap(baseTree, cmpTree)
 
-	files, hunks := buildFilesAndHunks(chunks)
+	filesMap, hunksMap := buildFilesAndHunksMaps(chunksMap)
 
-	findSectionInPatches(baseFilePath, baseLines, baseRange, files, hunks)
+	findSectionInPatches(baseFilePath, baseLines, baseRange, filesMap, hunksMap)
 }
 
-func findSectionInPatches(path string, baseLines []string, baseRange *lineOrRange, files map[string][]string, hunksMap map[string][]hunk) {
+func findSectionInPatches(path string, baseLines []string, baseRange *lineOrRange, filesMap map[string][]string, hunksMap map[string][]hunk) {
 	// check the same file path first
 	hunks, existed := hunksMap[path]
 	resultRange := &lineOrRange{
@@ -71,7 +71,7 @@ func findSectionInPatches(path string, baseLines []string, baseRange *lineOrRang
 	}
 	if existed {
 		delete(hunksMap, path)
-		file := files[path]
+		file := filesMap[path]
 		// Calculate the up-to-date range if there is modification happening
 		// before the base code section
 		for _, h := range hunks {
@@ -165,7 +165,7 @@ func getBaseLines(baseTree *gogit_object.Tree, baseFilePath string) []string {
 	return baseContent
 }
 
-func buildChunks(from, to *gogit_object.Tree) map[string][]gogit_diff.Chunk {
+func buildChunksMap(from, to *gogit_object.Tree) map[string][]gogit_diff.Chunk {
 	patch, err := from.Patch(to)
 	if err != nil {
 		log.Fatalf("Failed to obtain the patch: %s\n", err)
@@ -190,7 +190,7 @@ func buildChunks(from, to *gogit_object.Tree) map[string][]gogit_diff.Chunk {
 	return chunks
 }
 
-func buildFilesAndHunks(chunksMap map[string][]gogit_diff.Chunk) (map[string][]string, map[string][]hunk) {
+func buildFilesAndHunksMaps(chunksMap map[string][]gogit_diff.Chunk) (map[string][]string, map[string][]hunk) {
 	type result struct {
 		hunks []hunk
 		file  []string
@@ -290,10 +290,10 @@ func isSha(arg string) {
 }
 
 func parseLineOrRange(arg string) *lineOrRange {
-	splitted := strings.Split(arg, "-")
+	split := strings.Split(arg, "-")
 	var start, end int
 
-	start, err := strconv.Atoi(splitted[0])
+	start, err := strconv.Atoi(split[0])
 	if err != nil {
 		log.Fatalf("Failed to parse given line/range: %v\n", err)
 	}
@@ -302,8 +302,8 @@ func parseLineOrRange(arg string) *lineOrRange {
 		log.Fatalln("Given range should have a start > 0")
 	}
 
-	if len(splitted) > 1 {
-		end, err = strconv.Atoi(splitted[1])
+	if len(split) > 1 {
+		end, err = strconv.Atoi(split[1])
 		if err != nil {
 			log.Fatalf("Failed to parse given line/range: %v\n", err)
 		}
