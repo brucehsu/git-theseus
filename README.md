@@ -15,6 +15,6 @@ Given code found in moved.rb#L1-3
 ```
 
 ## Known Issues
-- Current implementation does not handle the scenario when the indentation of the given code has changed
+- Current implementation does not handle the scenario when the format of the given code, say indentation, has changed
 - Content comparison is done line-by-line
 - Messy structure and hard-coded values
