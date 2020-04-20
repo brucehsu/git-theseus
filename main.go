@@ -74,12 +74,13 @@ func findSectionInPatches(path string, baseLines []string, baseRange *lineOrRang
 		file := files[path]
 		for _, h := range hunks {
 			if h.contentRange.start <= resultRange.start {
+				delta := (h.contentRange.end - h.contentRange.start) + 1
 				if h.opType == gogit_diff.Add {
-					resultRange.start += (h.contentRange.end - h.contentRange.start) + 1
-					resultRange.end += (h.contentRange.end - h.contentRange.start) + 1
+					resultRange.start += delta
+					resultRange.end += delta
 				} else {
-					resultRange.start -= (h.contentRange.end - h.contentRange.start) + 1
-					resultRange.end -= (h.contentRange.end - h.contentRange.start) + 1
+					resultRange.start -= delta
+					resultRange.end -= delta
 				}
 			} else {
 				break
