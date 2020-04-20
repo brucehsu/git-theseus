@@ -88,7 +88,7 @@ func findSectionInPatches(path string, baseLines []string, baseRange *lineOrRang
 				break
 			}
 		}
-		if resultRange.start < 1 { // Chances are the code itself got deleted
+		if resultRange.start < 1 || resultRange.end >= len(file) { // Chances are the code itself got deleted or overflowed
 			resultRange = nil
 		} else {
 			for i, l := range file[resultRange.start-1 : resultRange.end] {
