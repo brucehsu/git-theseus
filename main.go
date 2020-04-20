@@ -72,6 +72,8 @@ func findSectionInPatches(path string, baseLines []string, baseRange *lineOrRang
 	if existed {
 		delete(hunksMap, path)
 		file := files[path]
+		// Calculate the up-to-date range if there is modification happening
+		// before the base code section
 		for _, h := range hunks {
 			if h.contentRange.start <= resultRange.start {
 				delta := (h.contentRange.end - h.contentRange.start) + 1
@@ -140,6 +142,10 @@ func findSectionInPatches(path string, baseLines []string, baseRange *lineOrRang
 	}
 
 	wg.Wait()
+	if len(resChan) == 0 {
+		fmt.Println("Given code is not found")
+		return
+	}
 	for i := 0; i < len(resChan); i++ {
 		fmt.Print(<-resChan)
 	}
