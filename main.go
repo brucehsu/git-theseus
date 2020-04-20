@@ -99,6 +99,9 @@ func findSectionInPatches(path string, baseLines []string, baseRange *lineOrRang
 			fmt.Printf("Given code found in %s#L%d-%d\n", path, resultRange.start, resultRange.end)
 			return
 		}
+	} else {
+		fmt.Printf("Given code found in %s#L%d-%d [File not changed]\n", path, baseRange.start, baseRange.end)
+		return
 	}
 
 	// check if the given code has been moved to another file
