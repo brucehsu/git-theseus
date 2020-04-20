@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 type lineOrRange struct {
@@ -50,7 +51,7 @@ func main() {
 	baseTree := getGitTree(repo, baseSha)
 
 	baseLines := getBaseLines(baseTree, baseFilePath)
-	baseLines = baseLines[baseRange.start - 1:baseRange.end]
+	baseLines = baseLines[baseRange.start-1 : baseRange.end]
 
 	cmpTree := getGitTree(repo, cmpSha)
 
@@ -66,7 +67,7 @@ func findSectionInPatches(path string, baseLines []string, baseRange *lineOrRang
 	hunks, existed := hunksMap[path]
 	resultRange := &lineOrRange{
 		start: baseRange.start,
-		end: baseRange.end,
+		end:   baseRange.end,
 	}
 	if existed {
 		delete(hunksMap, path)
@@ -87,7 +88,7 @@ func findSectionInPatches(path string, baseLines []string, baseRange *lineOrRang
 		if resultRange.start < 1 {
 			resultRange = nil
 		} else {
-			for i, l := range file[resultRange.start-1:resultRange.end] {
+			for i, l := range file[resultRange.start-1 : resultRange.end] {
 				if strings.Compare(baseLines[i], l) != 0 {
 					resultRange = nil
 					break
@@ -119,7 +120,7 @@ func findSectionInPatches(path string, baseLines []string, baseRange *lineOrRang
 			}
 
 			if i == len(baseLines) {
-				fmt.Printf("Given code found in %s#L%d-%d\n", hunkPath, h.contentRange.start + start, h.contentRange.start + start + len(baseLines) - 1)
+				fmt.Printf("Given code found in %s#L%d-%d\n", hunkPath, h.contentRange.start+start, h.contentRange.start+start+len(baseLines)-1)
 				return
 			}
 		}
@@ -165,51 +166,72 @@ func buildChunks(from, to *gogit_object.Tree) map[string][]gogit_diff.Chunk {
 	return chunks
 }
 
+func buildFilesAndHunks(chunksMap map[string][]gogit_diff.Chunk) (map[string][]string, map[string][]hunk) {
+	type result struct {
+		hunks []hunk
+		file  []string
+		path  string
+	}
+	resChan := make(chan result, len(chunksMap))
+	var wg sync.WaitGroup
 
-func buildFilesAndHunks(chunks map[string][]gogit_diff.Chunk) (map[string][]string, map[string][]hunk) {
+	for chunksPath, chunks := range chunksMap {
+		wg.Add(1)
+		go func(path string, cs []gogit_diff.Chunk, waitgroup *sync.WaitGroup) {
+			defer waitgroup.Done()
+			lineCursor := 0
+			h := make([]hunk, 0)
+			file := make([]string, 0)
+			for _, c := range cs {
+				lines := strings.Split(c.Content(), "\n") // naively use UNIX linebreak
+				if lines[len(lines)-1] == "" {
+					lines = lines[:len(lines)-1]
+				}
+				switch c.Type() {
+				case gogit_diff.Equal:
+					lineCursor += len(lines)
+					file = append(file, lines...)
+					printDiff("=", lines)
+				case gogit_diff.Add:
+					h = append(h, hunk{
+						contentRange: &lineOrRange{
+							start: lineCursor + 1,
+							end:   lineCursor + len(lines),
+						},
+						contentLines: lines,
+						opType:       gogit_diff.Add,
+					})
+					lineCursor += len(lines)
+					file = append(file, lines...)
+					printDiff("+", lines)
+				case gogit_diff.Delete:
+					// Do nothing
+					h = append(h, hunk{
+						contentRange: &lineOrRange{
+							start: lineCursor + 1,
+							end:   lineCursor + len(lines),
+						},
+						contentLines: lines,
+						opType:       gogit_diff.Delete,
+					})
+				}
+			}
+			resChan <- result{
+				hunks: h,
+				file:  file,
+				path:  path,
+			}
+		}(chunksPath, chunks, &wg)
+	}
+
+	wg.Wait()
+
 	hunks := make(map[string][]hunk)
 	files := make(map[string][]string)
-	for path, chunk := range chunks {
-		lineCursor := 0
-		h := make([]hunk, 0)
-		file := make([]string, 0)
-		for _, c := range chunk {
-			lines := strings.Split(c.Content(), "\n") // naively use UNIX linebreak
-			if lines[len(lines)-1] == "" {
-				lines = lines[:len(lines)-1]
-			}
-			switch c.Type() {
-			case gogit_diff.Equal:
-				lineCursor += len(lines)
-				file = append(file, lines...)
-				printDiff("=", lines)
-			case gogit_diff.Add:
-				h = append(h, hunk{
-					contentRange: &lineOrRange{
-						start: lineCursor + 1,
-						end:   lineCursor + len(lines),
-					},
-					contentLines: lines,
-					opType: gogit_diff.Add,
-				})
-				lineCursor += len(lines)
-				file = append(file, lines...)
-				printDiff("+", lines)
-			case gogit_diff.Delete:
-				// Do nothing
-				h = append(h, hunk{
-					contentRange: &lineOrRange{
-						start: lineCursor + 1,
-						end:   lineCursor + len(lines),
-					},
-					contentLines: lines,
-					opType: gogit_diff.Delete,
-				})
-			}
-		}
-
-		files[path] = file
-		hunks[path] = h
+	for range chunksMap {
+		res := <-resChan
+		hunks[res.path] = res.hunks
+		files[res.path] = res.file
 	}
 
 	return files, hunks
