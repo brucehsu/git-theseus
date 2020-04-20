@@ -18,6 +18,11 @@ type lineOrRange struct {
 	end   int
 }
 
+type hunk struct {
+	contentRange lineOrRange
+	contentLines []string
+}
+
 func main() {
 	if len(os.Args) != 5 {
 		fmt.Println("usage: git-theseus [BASE_SHA] [FILE_PATH] [LINE_OR_RANGE] [COMPARE_SHA]")
@@ -59,7 +64,14 @@ func main() {
 
 	cmpTree := getGitTree(repo, cmpSha)
 
-	patch, err := cmpTree.Patch(baseTree)
+	chunks := buildChunks(baseTree, cmpTree)
+
+	hunks := buildHunks(chunks)
+	fmt.Println(hunks)
+}
+
+func buildChunks(from, to *gogit_object.Tree) map[string][]gogit_diff.Chunk {
+	patch, err := from.Patch(to)
 	if err != nil {
 		log.Fatalf("Failed to obtain the patch: %s\n", err)
 	}
@@ -79,23 +91,48 @@ func main() {
 		}
 		chunks[to.Path()] = filePatch.Chunks()
 	}
-	for path, chunk := range chunks {
-		fmt.Printf("# %s\n", path)
-		for _, c := range chunk {
-			switch c.Type() {
-			case gogit_diff.Equal:
-				printDiff("=", c.Content())
-			case gogit_diff.Add:
-				printDiff("+", c.Content())
-			case gogit_diff.Delete:
-				printDiff("-", c.Content())
-			}
-		}
-	}
+
+	return chunks
 }
 
-func printDiff(prefix string, content string) {
-	lines := strings.Split(content, "\n")
+func buildHunks(chunks map[string][]gogit_diff.Chunk) map[string][]hunk {
+	hunks := make(map[string][]hunk)
+	for path, chunk := range chunks {
+		lineCursor := 0
+		fmt.Printf("# %s\n", path)
+		h := make([]hunk, 0)
+		for _, c := range chunk {
+			lines := strings.Split(c.Content(), "\n") // naively use UNIX linebreak
+			if lines[len(lines)-1] == "" {
+				lines = lines[:len(lines)-1]
+			}
+			switch c.Type() {
+			case gogit_diff.Equal:
+				lineCursor += len(lines)
+				printDiff("=", lines)
+			case gogit_diff.Add:
+				h = append(h, hunk{
+					contentRange: lineOrRange{
+						start: lineCursor + 1,
+						end:   lineCursor + len(lines),
+					},
+					contentLines: lines,
+				})
+				lineCursor += len(lines)
+				printDiff("+", lines)
+			case gogit_diff.Delete:
+				// Do nothing
+			}
+		}
+
+		hunks[path] = h
+		fmt.Printf("#### length: %d %s\n", lineCursor, path)
+	}
+
+	return hunks
+}
+
+func printDiff(prefix string, lines []string) {
 	for _, l := range lines {
 		fmt.Printf("%s %s\n", prefix, l)
 	}
